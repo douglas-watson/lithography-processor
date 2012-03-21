@@ -40,24 +40,27 @@ png_toolkit.py (for importing and conversion of pictures) and XXX.
 __title__ = 'Lithography preprocessor'
 __version__ = '0.1 alpha'
 
+# Math and plotting
 from mpl_figure_editor import MPLFigureEditor, Figure
 from mpl_toolkits.mplot3d import Axes3D
 from matplotlib import cm
 from numpy import array, transpose
 
+# GUI
 from enthought.traits.api import HasTraits, Float, Instance, Button, String, \
         File, Trait, Array
 from enthought.traits.ui.api import View, Item, Group, HGroup, Spring, HSplit, \
         Label
 import enthought.traits.ui
 
+# Application logic
+from lithography_toolkit import path_to_array, get_referential
+
 ##############################
 # Helpers 
 ##############################
 
-# My own librairies
-from png_toolkit import path_to_array
-
+# Note that I do not distinguish vector and point.
 Vector = Array(shape=(3,1), dtype='float')
 
 def nonzero_validator(object, name, value):
@@ -67,7 +70,6 @@ def nonzero_validator(object, name, value):
     value = float(value)
 
     if value == 0:
-        print "bleh"
         raise ValueError("%s cannot be zero" % name)
     else:
         return float(value)
@@ -158,12 +160,22 @@ class Referential(HasTraits):
     stage, and use that to establish a 'wafer coordinate system', to convert
     points on the wafer plane to points in the space of the stage.
 
+    There's a lot of messing about with transposing and stuff, mostly because
+    it's convenient to have column vectors in the graphical interface
+
     '''
 
     # The wafer plane is given by three point, O, A, and B
     O = Vector
     A = Vector
     B = Vector
+
+    # The following three vectors define the orientation. Origin is O.
+    eX = Vector
+    eY = Vector
+    eZ = Vector
+
+    preview = Instance(Preview3D)
 
     recalculate = Button
 
@@ -178,11 +190,25 @@ class Referential(HasTraits):
                       Item(name='recalculate', show_label=False),
                 )
 
-    def __init__(self):
-        super(Referential, self).__init__()
+    def __init__(self, *args, **kwargs):
+        super(Referential, self).__init__(*args, **kwargs)
         self.O = array([[0., 0., 0.]]).transpose()
         self.A = array([[1., 0., 0.]]).transpose()
         self.B = array([[0., 1., 0.]]).transpose()
+
+    def _recalculate_fired(self):
+        eX, eY, eZ = get_referential(self.O, self.A, self.B)
+
+        self.eX = eX.reshape(3, 1)
+        self.eY = eY.reshape(3, 1)
+        self.eZ = eZ.reshape(3, 1)
+
+        print self.eZ
+
+    def update_preview(self):
+
+        # Plot O, A, and B
+        self.preview.figure.scatter()
 
 class MainWindow(HasTraits):
     '''
@@ -225,10 +251,11 @@ if __name__ == '__main__':
     # Create objects saved between several components
     preview2D = Preview2D()
     preview3D = Preview3D()
+    referential = Referential(preview=preview3D)
     image_config = ImageConfig(preview=preview2D)
 
     mainwindow = MainWindow(image_config=image_config, 
-                            stage_config=Referential(),
+                            stage_config=referential,
                             preview2D=preview2D, 
                             preview3D=preview3D
                            )
