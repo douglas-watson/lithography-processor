@@ -43,9 +43,10 @@ __version__ = '0.1 alpha'
 from mpl_figure_editor import MPLFigureEditor, Figure
 from mpl_toolkits.mplot3d import Axes3D
 from matplotlib import cm
+from numpy import array, transpose
 
 from enthought.traits.api import HasTraits, Float, Instance, Button, String, \
-        File, Trait
+        File, Trait, Array
 from enthought.traits.ui.api import View, Item, Group, HGroup, Spring, HSplit, \
         Label
 import enthought.traits.ui
@@ -56,6 +57,8 @@ import enthought.traits.ui
 
 # My own librairies
 from png_toolkit import path_to_array
+
+Vector = Array(shape=(3,1), dtype='float')
 
 def nonzero_validator(object, name, value):
     ''' Verify that value is non-zero. '''
@@ -157,38 +160,29 @@ class Referential(HasTraits):
 
     '''
 
-    Ox = Float
-    Oy = Float
-    Oz = Float
-
-    Ax = Float(1.0)
-    Ay = Float
-    Az = Float
-
-    Bx = Float
-    By = Float(1.0)
-    Bz = Float
+    # The wafer plane is given by three point, O, A, and B
+    O = Vector
+    A = Vector
+    B = Vector
 
     recalculate = Button
 
     traits_view = View(
-                Group(Item(name='Ox'),
-                      Item(name='Ax'),
-                      Item(name='Bx'),
-                      Item(name='Oy'),
-                      Item(name='Ay'),
-                      Item(name='By'),
-                      Item(name='Oz'),
-                      Item(name='Az'),
-                      Item(name='Bz'),
-                      Spring(),
-                      Spring(),
-                      Item(name='recalculate', show_label=False),
+                Group(Item(name='O'),
+                      Item(name='A'),
+                      Item(name='B'),
                       label='Wafer reference points [um]',
                       show_border=True,
-                      orientation='vertical',
-                      columns=3)
+                      orientation='horizontal',
+                      ),
+                      Item(name='recalculate', show_label=False),
                 )
+
+    def __init__(self):
+        super(Referential, self).__init__()
+        self.O = array([[0., 0., 0.]]).transpose()
+        self.A = array([[1., 0., 0.]]).transpose()
+        self.B = array([[0., 1., 0.]]).transpose()
 
 class MainWindow(HasTraits):
     '''
