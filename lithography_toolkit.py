@@ -56,11 +56,6 @@ def get_referential(O, A, B):
 
     '''
 
-    # Must flatten to a 1D vector for cross product to work
-    O = O.flatten()
-    A = A.flatten()
-    B = B.flatten()
-
     # For explanations, see 'coordinate_transformation.jpg'
     OA = A - O
     eX = OA / norm(OA)
@@ -75,8 +70,8 @@ def get_referential(O, A, B):
 
 
 if __name__ == '__main__':
-    O = array([[0, 0, 0]]).transpose()
-    A = array([[1, 0, 0]]).transpose()
-    B = array([[0, 1, 0]]).transpose()
+    O = array([0, 0, 0])
+    A = array([1, 0, 0])
+    B = array([0, 1, 0])
 
     print get_referential(O, A, B)

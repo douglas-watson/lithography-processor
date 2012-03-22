@@ -44,16 +44,22 @@ __version__ = '0.1 alpha'
 from mpl_figure_editor import MPLFigureEditor, Figure
 from mpl_toolkits.mplot3d import Axes3D
 from matplotlib import cm
-from numpy import array, transpose
+from numpy import array, transpose, r_, c_
 
 # GUI
+import wx
 from enthought.traits.api import HasTraits, Float, Instance, Button, String, \
-        File, Trait, Array
+        File, Trait, Array, on_trait_change
 from enthought.traits.ui.api import View, Item, Group, HGroup, Spring, HSplit, \
         Label
 import enthought.traits.ui
+from enthought.mayavi.core.api import PipelineBase
+from enthought.mayavi.core.ui.api import MayaviScene, SceneEditor, \
+        MlabSceneModel
+
 
 # Application logic
+import logging
 from lithography_toolkit import path_to_array, get_referential
 
 ##############################
@@ -61,7 +67,7 @@ from lithography_toolkit import path_to_array, get_referential
 ##############################
 
 # Note that I do not distinguish vector and point.
-Vector = Array(shape=(3,1), dtype='float')
+Vector = Array(shape=(3,), dtype='float')
 
 def nonzero_validator(object, name, value):
     ''' Verify that value is non-zero. '''
@@ -108,20 +114,59 @@ class Preview2D(HasTraits):
         ly = width/2
         self.ax.imshow(array, cmap=cm.gray, interpolation='nearest',
                       extent=[-lx, lx, -ly, ly])
-        self.figure.canvas.draw()
+        try:
+            wx.CallAfter(self.figure.canvas.draw)
+        except AttributeError, e:
+            # Probably been called before the canvas was instantiated
+            logging.warning('Plot_array called too early')
+        except:
+            raise
 
-class Preview3D(Preview2D):
+class Preview3D(HasTraits):
 
     '''
     A 3D matplotlib plot
     '''
 
-    def __init__(self):
-        super(Preview3D, self).__init__()
+    scene = Instance(MlabSceneModel, ())
+    points = Instance(PipelineBase)
+    axes = Instance(PipelineBase) # wafer referential axes
 
-        self.ax = self.figure.add_subplot(111, projection='3d')
+    traits_view = View(Item('scene', editor=SceneEditor(
+        scene_class=MayaviScene),
+        height=300, width=400, show_label=False),
+        resizable=True,
+    )
 
-class ImageConfig(HasTraits):
+    # @on_trait_change('scene.activated')
+    def update_points(self, O, A, B):
+        Xs, Ys, Zs = c_[O, A, B]
+        if self.points is None:
+            self.points = self.scene.mlab.points3d(Xs, Ys, Zs, 
+                                           color=(0,0,1), scale_factor=0.1)
+        else:
+            self.points.mlab_source.set(x=Xs, y=Ys, z=Zs)
+
+    def update_axes(self, O, eX, eY, eZ):
+        ''' Update the rendering of the wafer's axes 
+        
+        ARGUMENTS:
+        O (Vector) - origin of the wafer's coordinate system
+        eX, eY, eZ (Vector) - orthonormal basis
+
+        '''
+
+        # reshape:
+        Ox, Oy, Oz = c_[O, O, O] # coordinates of origin
+        Ex, Ey, Ez = c_[eX, eY, eZ] # stack of Xs coords, Ys, then Zs
+        if self.axes is None:
+            self.axes = self.scene.mlab.quiver3d(Ox, Oy, Oz, Ex, Ey, Ez,
+                                                mode='arrow')
+        else:
+            self.axes.mlab_source.set(x=Ox, y=Oy, z=Oz, u=Ex, v=Ey, w=Ez)
+
+
+class Picture(HasTraits):
     '''
     Defines the image to be written, and extra information (size).
 
@@ -129,28 +174,40 @@ class ImageConfig(HasTraits):
 
     path = File('/home/douglas/research/lno/lithography/' +
                   'raster_lithography/220px-Tux.png')
-    preview = Instance(Preview2D)
+    preview2D = Instance(Preview2D)
+    preview3D = Instance(Preview3D)
+
     width = Trait(10, nonzero_validator)  # in um
     height = Trait(10, nonzero_validator) # in um
-    update = Button
+
+    update2D = Button(label='Update 2D')
+    update3D = Button(label='Update 3D')
 
     traits_view = View(
                 Group(Item(name='path'),
                       Item(name='width', label='Width [um]'),
                       Item(name='height', label='Height [um]'),
-                      Item(name='update', show_label=False, springy=False),
+                      Group(
+                          Spring(),
+                          Item(name='update2D', show_label=False),
+                          Item(name='update3D', show_label=False),
+                          orientation='horizontal'),
                       label='Picture configuration',
                       show_border=True,
                      )
                     )
 
-    def _update_fired(self):
+    def _update2D_fired(self):
+        self.update_preview2d()
+
+    @on_trait_change('width', 'height', 'path')
+    def update_preview2d(self):
         ''' Update the 2D image preview. 
         
         This functions reads in the picture and plots the preview '''
 
         data = path_to_array(self.path)
-        self.preview.plot_array(data, self.width, self.height)
+        self.preview2D.plot_array(data, self.width, self.height)
 
 class Referential(HasTraits):
     ''' 
@@ -180,35 +237,36 @@ class Referential(HasTraits):
     recalculate = Button
 
     traits_view = View(
-                Group(Item(name='O'),
-                      Item(name='A'),
-                      Item(name='B'),
-                      label='Wafer reference points [um]',
-                      show_border=True,
-                      orientation='horizontal',
-                      ),
-                      Item(name='recalculate', show_label=False),
-                )
+        Group(
+            Group(Item(name='O'),
+                  Item(name='A'),
+                  Item(name='B'),
+                  show_border=False,
+                  orientation='horizontal'),
+            Item(name='recalculate', show_label=False),
+            label='Wafer reference points [um]',
+            show_border=True,),
+    )
 
     def __init__(self, *args, **kwargs):
         super(Referential, self).__init__(*args, **kwargs)
-        self.O = array([[0., 0., 0.]]).transpose()
-        self.A = array([[1., 0., 0.]]).transpose()
-        self.B = array([[0., 1., 0.]]).transpose()
+        self.O = array([0., 0., 0.])
+        self.A = array([1., 0., 0.])
+        self.B = array([1., 1., 1.])
+
+        self._recalculate_fired()
 
     def _recalculate_fired(self):
-        eX, eY, eZ = get_referential(self.O, self.A, self.B)
+        self.eX, self.eY, self.eZ = get_referential(self.O, self.A, self.B)
 
-        self.eX = eX.reshape(3, 1)
-        self.eY = eY.reshape(3, 1)
-        self.eZ = eZ.reshape(3, 1)
-
-        print self.eZ
+        self.update_preview()
 
     def update_preview(self):
+        ''' Update the 3D preview: plot O, A, and B, as well as eX, eY, eZ '''
 
-        # Plot O, A, and B
-        self.preview.figure.scatter()
+        self.preview.update_axes(self.O, self.eX, self.eY, self.eZ)
+        self.preview.update_points(self.O, self.A, self.B)
+
 
 class MainWindow(HasTraits):
     '''
@@ -220,7 +278,7 @@ class MainWindow(HasTraits):
 
     '''
 
-    image_config = Instance(ImageConfig)
+    image_config = Instance(Picture)
     stage_config = Instance(Referential)
     preview2D = Instance(Preview2D)
     preview3D = Instance(Preview3D)
@@ -248,11 +306,13 @@ class MainWindow(HasTraits):
 
 if __name__ == '__main__':
 
+    logging.basicConfig(level=logging.DEBUG)
+
     # Create objects saved between several components
     preview2D = Preview2D()
     preview3D = Preview3D()
     referential = Referential(preview=preview3D)
-    image_config = ImageConfig(preview=preview2D)
+    image_config = Picture(preview2D=preview2D, preview3D=preview3D)
 
     mainwindow = MainWindow(image_config=image_config, 
                             stage_config=referential,

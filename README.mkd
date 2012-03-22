@@ -1,0 +1,7 @@
+% Raster Lithography module
+% 20 March 2012
+% Douglas Watson
+
+This python module is designed to perform 2-photon lithography from raster images. The operator provides a PNG image of the pattern to draw, and this program draws the structure in resist.
+
+
