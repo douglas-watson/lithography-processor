@@ -180,7 +180,7 @@ class Preview3D(HasTraits):
         if self.picture is None:
             self.picture = self.scene.mlab.points3d(X, Y, Z,
                                                    scale_factor=0.5)
-            frame = self.scene.mlab.outline(self.picture)
+            # frame = self.scene.mlab.outline(self.picture)
         else:
             self.picture.mlab_source.set(x=X, y=Y, z=Z)
 
