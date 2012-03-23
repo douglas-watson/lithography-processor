@@ -46,7 +46,7 @@ import os
 from mpl_figure_editor import MPLFigureEditor, Figure
 from mpl_toolkits.mplot3d import Axes3D
 from matplotlib import cm
-from numpy import array, transpose, r_, c_, zeros, ones, savetxt
+from numpy import array, transpose, r_, c_, zeros, ones, savetxt, size
 
 # GUI
 import wx
@@ -122,7 +122,7 @@ class Preview2D(HasTraits):
             wx.CallAfter(self.figure.canvas.draw)
         except AttributeError, e:
             # Probably been called before the canvas was instantiated
-            logging.warning('Plot_array called too early')
+            logging.error('Plot_array called too early')
         except:
             raise
 
@@ -180,6 +180,7 @@ class Preview3D(HasTraits):
         if self.picture is None:
             self.picture = self.scene.mlab.points3d(X, Y, Z,
                                                    scale_factor=0.5)
+            frame = self.scene.mlab.outline(self.picture)
         else:
             self.picture.mlab_source.set(x=X, y=Y, z=Z)
 
@@ -226,7 +227,7 @@ class Referential(HasTraits):
         super(Referential, self).__init__(*args, **kwargs)
         self.O = array([0., 0., 0.])
         self.A = array([1., 0., 0.])
-        self.B = array([1., 1., 1.])
+        self.B = array([0., 1., 0.])
 
         self._recalculate_fired()
 
@@ -251,6 +252,8 @@ class Picture(HasTraits):
                   'raster_lithography/220px-Tux.png')
     # TODO set the size automatically based on number of pixels
     # It might make more sense to give a 'pixel size' instead.
+    pixel_size = Trait(1, nonzero_validator) # in um
+
     width = Trait(10, nonzero_validator)  # in um
     height = Trait(10, nonzero_validator) # in um
 
@@ -269,8 +272,7 @@ class Picture(HasTraits):
 
     traits_view = View(
                 Group(Item(name='path'),
-                      Item(name='width', label='Width [um]'),
-                      Item(name='height', label='Height [um]'),
+                      Item(name='pixel_size', label='Pixel size [um]'),
                       Group(
                           Spring(),
                           Item(name='update2D', show_label=False),
@@ -287,12 +289,27 @@ class Picture(HasTraits):
     def _update3D_fired(self):
         self.update_preview3d()
 
+    @on_trait_change('pixel_size')
+    def update_dimensions(self):
+        ''' Compute figure dimensions based on picture size '''
+
+        if size(self.data) != 0:
+            Ny, Nx = self.data.shape # number of pixels
+            self.width = Nx * self.pixel_size
+            self.height = Ny * self.pixel_size
+            self.update_preview2d() # doesn't seem to work on its own
+            self.update_preview3d() # same here
+
     @on_trait_change('path')
     def update_data(self):
         ''' Read path and update the data Trait '''
 
-        self.data = path_to_array(self.path)
-        self.update_preview2d()
+        try:
+            self.data = path_to_array(self.path)
+        except IOError, e:
+            dialog.error(None, "Invalid image file.")
+        else:
+            self.update_preview2d()
 
     @on_trait_change('width', 'height')
     def update_preview2d(self):
@@ -310,6 +327,7 @@ class Picture(HasTraits):
 
         '''
 
+        # Update the rest
         O, eX, eY, eZ = self.stage_ref.O, self.stage_ref.eX, \
                 self.stage_ref.eY, self.stage_ref.eZ
 
