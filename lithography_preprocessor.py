@@ -40,11 +40,13 @@ png_toolkit.py (for importing and conversion of pictures) and XXX.
 __title__ = 'Lithography preprocessor'
 __version__ = '0.1 alpha'
 
+import os
+
 # Math and plotting
 from mpl_figure_editor import MPLFigureEditor, Figure
 from mpl_toolkits.mplot3d import Axes3D
 from matplotlib import cm
-from numpy import array, transpose, r_, c_
+from numpy import array, transpose, r_, c_, zeros, ones, savetxt
 
 # GUI
 import wx
@@ -60,7 +62,8 @@ from enthought.mayavi.core.ui.api import MayaviScene, SceneEditor, \
 
 # Application logic
 import logging
-from lithography_toolkit import path_to_array, get_referential
+from lithography_toolkit import path_to_array, get_referential, \
+        get_black_points, transform_coordinates
 
 ##############################
 # Helpers 
@@ -129,8 +132,9 @@ class Preview3D(HasTraits):
     '''
 
     scene = Instance(MlabSceneModel, ())
-    points = Instance(PipelineBase)
-    axes = Instance(PipelineBase) # wafer referential axes
+    points = Instance(PipelineBase)  # O, A, and B
+    axes = Instance(PipelineBase)    # wafer referential axes
+    picture = Instance(PipelineBase) # The image to draw
 
     traits_view = View(Item('scene', editor=SceneEditor(
         scene_class=MayaviScene),
@@ -165,49 +169,18 @@ class Preview3D(HasTraits):
         else:
             self.axes.mlab_source.set(x=Ox, y=Oy, z=Oz, u=Ex, v=Ey, w=Ez)
 
+    def update_picture(self, X, Y, Z):
+        ''' Draw the points to be exposed
 
-class Picture(HasTraits):
-    '''
-    Defines the image to be written, and extra information (size).
+        ARGUMENTS:
+        X, Y, Z (1D numpy arrays) - coordinates of points to expose
 
-    '''
-
-    path = File('/home/douglas/research/lno/lithography/' +
-                  'raster_lithography/220px-Tux.png')
-    preview2D = Instance(Preview2D)
-    preview3D = Instance(Preview3D)
-
-    width = Trait(10, nonzero_validator)  # in um
-    height = Trait(10, nonzero_validator) # in um
-
-    update2D = Button(label='Update 2D')
-    update3D = Button(label='Update 3D')
-
-    traits_view = View(
-                Group(Item(name='path'),
-                      Item(name='width', label='Width [um]'),
-                      Item(name='height', label='Height [um]'),
-                      Group(
-                          Spring(),
-                          Item(name='update2D', show_label=False),
-                          Item(name='update3D', show_label=False),
-                          orientation='horizontal'),
-                      label='Picture configuration',
-                      show_border=True,
-                     )
-                    )
-
-    def _update2D_fired(self):
-        self.update_preview2d()
-
-    @on_trait_change('width', 'height', 'path')
-    def update_preview2d(self):
-        ''' Update the 2D image preview. 
-        
-        This functions reads in the picture and plots the preview '''
-
-        data = path_to_array(self.path)
-        self.preview2D.plot_array(data, self.width, self.height)
+        '''
+        if self.picture is None:
+            self.picture = self.scene.mlab.points3d(X, Y, Z,
+                                                   scale_factor=0.5)
+        else:
+            self.picture.mlab_source.set(x=X, y=Y, z=Z)
 
 class Referential(HasTraits):
     ''' 
@@ -267,6 +240,84 @@ class Referential(HasTraits):
         self.preview.update_axes(self.O, self.eX, self.eY, self.eZ)
         self.preview.update_points(self.O, self.A, self.B)
 
+class Picture(HasTraits):
+    '''
+    Defines the image to be written, and extra information (size).
+
+    '''
+
+    path = File('/home/douglas/research/lno/lithography/' +
+                  'raster_lithography/220px-Tux.png')
+    # TODO set the size automatically based on number of pixels
+    # It might make more sense to give a 'pixel size' instead.
+    width = Trait(10, nonzero_validator)  # in um
+    height = Trait(10, nonzero_validator) # in um
+
+    data = Array(dtype='int') # 2D array of 1s and 0s
+    stage_ref = Instance(Referential)
+
+    preview2D = Instance(Preview2D)
+    preview3D = Instance(Preview3D)
+
+    update2D = Button(label='Update 2D')
+    update3D = Button(label='Update 3D')
+
+    X = Array(dtype='float')
+    Y = Array(dtype='float')
+    Z = Array(dtype='float')
+
+    traits_view = View(
+                Group(Item(name='path'),
+                      Item(name='width', label='Width [um]'),
+                      Item(name='height', label='Height [um]'),
+                      Group(
+                          Spring(),
+                          Item(name='update2D', show_label=False),
+                          Item(name='update3D', show_label=False),
+                          orientation='horizontal'),
+                      label='Picture configuration',
+                      show_border=True,
+                     )
+                    )
+
+    def _update2D_fired(self):
+        self.update_preview2d()
+
+    def _update3D_fired(self):
+        self.update_preview3d()
+
+    @on_trait_change('path')
+    def update_data(self):
+        ''' Read path and update the data Trait '''
+
+        self.data = path_to_array(self.path)
+        self.update_preview2d()
+
+    @on_trait_change('width', 'height')
+    def update_preview2d(self):
+        ''' Update the 2D image preview. '''
+
+        if len(self.data) == 0: # Hasn't been initialised yet
+            self.data = path_to_array(self.path)
+        self.preview2D.plot_array(self.data, self.width, self.height)
+
+    def update_preview3d(self):
+        ''' Update the 3D preview.
+
+        This functions first finds the black pixels, then transforms the
+        coordinates to stage coordinates, them updates the preview.
+
+        '''
+
+        O, eX, eY, eZ = self.stage_ref.O, self.stage_ref.eX, \
+                self.stage_ref.eY, self.stage_ref.eZ
+
+        x, y = get_black_points(self.data, self.width,
+                                self.height)
+        X, Y, Z = transform_coordinates(x, y, zeros(len(x)), O, eX, eY, eZ)
+        self.X, self.Y, self.Z = X, Y, Z
+
+        self.preview3D.update_picture(X, Y, Z)
 
 class MainWindow(HasTraits):
     '''
@@ -274,15 +325,18 @@ class MainWindow(HasTraits):
         - A column of config (picture file and size, referential settings)
         - A 2D preview of the image to draw, in the referential of the wafer
         - A 3D preview of the points to expose, in the ref. of the stage
+        - A file path to export the points to
         - An export button, to export the coordinates of the points to expose
 
     '''
+
+    export_path = File(os.path.abspath(os.curdir) + '/expose_points.dat')
+    export_data = Button
 
     image_config = Instance(Picture)
     stage_config = Instance(Referential)
     preview2D = Instance(Preview2D)
     preview3D = Instance(Preview3D)
-    export_data = Button
 
     traits_view = View(
         HSplit(
@@ -291,7 +345,12 @@ class MainWindow(HasTraits):
                      springy=True),
                 Item('stage_config', style='custom', show_label=False,
                     springy=True),
-                Item('export_data', show_label=False, springy=False)
+                Group(
+                    Item('export_path', show_label=True, springy=False),
+                    Item('export_data', show_label=False, springy=False),
+                    label='Export points',
+                    show_border=True,
+                ),
             ),
             Item('preview2D', style='custom', show_label=False),
             Item('preview3D', style='custom', show_label=False),
@@ -299,6 +358,15 @@ class MainWindow(HasTraits):
         resizable=True,
         title="%s v. %s" % (__title__, __version__),
     )
+
+    def _export_data_fired(self):
+        ''' Export the points to expose to the specified file. ''' 
+
+        print "Exporting data to %s", self.export_path
+        im = self.image_config
+        points = c_[im.X, im.Y, im.Z]
+        savetxt(self.export_path, points, fmt='%.6f')
+
 
 ##############################
 # Main program 
@@ -312,7 +380,8 @@ if __name__ == '__main__':
     preview2D = Preview2D()
     preview3D = Preview3D()
     referential = Referential(preview=preview3D)
-    image_config = Picture(preview2D=preview2D, preview3D=preview3D)
+    image_config = Picture(preview2D=preview2D, preview3D=preview3D,
+                           stage_ref=referential)
 
     mainwindow = MainWindow(image_config=image_config, 
                             stage_config=referential,
