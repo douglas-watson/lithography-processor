@@ -58,6 +58,7 @@ import enthought.traits.ui
 from enthought.mayavi.core.api import PipelineBase
 from enthought.mayavi.core.ui.api import MayaviScene, SceneEditor, \
         MlabSceneModel
+from enthought.util.wx import dialog
 
 
 # Application logic
@@ -365,7 +366,16 @@ class MainWindow(HasTraits):
         print "Exporting data to %s", self.export_path
         im = self.image_config
         points = c_[im.X, im.Y, im.Z]
-        savetxt(self.export_path, points, fmt='%.6f')
+
+        if os.path.exists(self.export_path):
+            # make sure user wants to overwrite
+            answer = dialog.confirmation(None, 
+                                         'File already exists. Overwrite?')
+            if answer == wx.ID_YES:
+                savetxt(self.export_path, points, fmt='%.6f')
+            else:
+                # don't save...
+                pass
 
 
 ##############################
