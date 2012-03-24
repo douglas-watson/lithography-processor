@@ -33,7 +33,7 @@ coordinates of each point to be exposed.
 
 The interface is built using Traits UI. Most of this file is dedicated to
 defining the interface. The actual operations on pictures are found in
-png_toolkit.py (for importing and conversion of pictures) and XXX.
+lithography_toolkit.py (for importing and conversion of pictures, coordinate transforms and so on).
 
 '''
 
@@ -170,19 +170,22 @@ class Preview3D(HasTraits):
         else:
             self.axes.mlab_source.set(x=Ox, y=Oy, z=Oz, u=Ex, v=Ey, w=Ez)
 
-    def update_picture(self, X, Y, Z):
+    def update_picture(self, X, Y, Z, pixel_size=1):
         ''' Draw the points to be exposed
 
         ARGUMENTS:
         X, Y, Z (1D numpy arrays) - coordinates of points to expose
 
         '''
+
+        point_size = pixel_size * ones(len(X))
+
         if self.picture is None:
-            self.picture = self.scene.mlab.points3d(X, Y, Z,
-                                                   scale_factor=0.5)
+            self.picture = self.scene.mlab.points3d(X, Y, Z, point_size,
+                                                    scale_factor=1)
             # frame = self.scene.mlab.outline(self.picture)
         else:
-            self.picture.mlab_source.set(x=X, y=Y, z=Z)
+            self.picture.mlab_source.set(x=X, y=Y, z=Z, scalars=point_size)
 
 class Referential(HasTraits):
     ''' 
@@ -252,10 +255,11 @@ class Picture(HasTraits):
                   'raster_lithography/220px-Tux.png')
     # TODO set the size automatically based on number of pixels
     # It might make more sense to give a 'pixel size' instead.
-    pixel_size = Trait(1, nonzero_validator) # in um
+    pixel_size = Trait(1.0, nonzero_validator) # in um
+    pixel_spacing = Trait(1.0, nonzero_validator) # in um
 
-    width = Trait(10, nonzero_validator)  # in um
-    height = Trait(10, nonzero_validator) # in um
+    width = Trait(10.0, nonzero_validator)  # in um
+    height = Trait(10.0, nonzero_validator) # in um
 
     data = Array(dtype='int') # 2D array of 1s and 0s
     stage_ref = Instance(Referential)
@@ -272,6 +276,7 @@ class Picture(HasTraits):
 
     traits_view = View(
                 Group(Item(name='path'),
+                      Item(name='pixel_spacing', label='Pixel spacing [um]'),
                       Item(name='pixel_size', label='Pixel size [um]'),
                       Group(
                           Spring(),
@@ -289,16 +294,19 @@ class Picture(HasTraits):
     def _update3D_fired(self):
         self.update_preview3d()
 
-    @on_trait_change('pixel_size')
+    @on_trait_change('pixel_spacing', 'pixel_size')
     def update_dimensions(self):
         ''' Compute figure dimensions based on picture size '''
 
-        if size(self.data) != 0:
+        logging.debug("Updating dimensions. Pixel size %f, spacing %f" % \
+                     (self.pixel_size, self.pixel_spacing))
+
+        if size(self.data) != 0: # Only if data has been loaded
             Ny, Nx = self.data.shape # number of pixels
-            self.width = Nx * self.pixel_size
-            self.height = Ny * self.pixel_size
-            self.update_preview2d() # doesn't seem to work on its own
-            self.update_preview3d() # same here
+            self.width = Nx * self.pixel_spacing
+            self.height = Ny * self.pixel_spacing
+            self.update_preview2d()
+            self.update_preview3d()
 
     @on_trait_change('path')
     def update_data(self):
@@ -309,7 +317,7 @@ class Picture(HasTraits):
         except IOError, e:
             dialog.error(None, "Invalid image file.")
         else:
-            self.update_preview2d()
+            self.update_dimensions() # This will also update 2D and 3D.
 
     @on_trait_change('width', 'height')
     def update_preview2d(self):
@@ -317,6 +325,7 @@ class Picture(HasTraits):
 
         if len(self.data) == 0: # Hasn't been initialised yet
             self.data = path_to_array(self.path)
+            self.update_dimensions()
         self.preview2D.plot_array(self.data, self.width, self.height)
 
     def update_preview3d(self):
@@ -327,7 +336,9 @@ class Picture(HasTraits):
 
         '''
 
-        # Update the rest
+        if len(self.data) == 0:
+            return
+
         O, eX, eY, eZ = self.stage_ref.O, self.stage_ref.eX, \
                 self.stage_ref.eY, self.stage_ref.eZ
 
@@ -336,7 +347,7 @@ class Picture(HasTraits):
         X, Y, Z = transform_coordinates(x, y, zeros(len(x)), O, eX, eY, eZ)
         self.X, self.Y, self.Z = X, Y, Z
 
-        self.preview3D.update_picture(X, Y, Z)
+        self.preview3D.update_picture(X, Y, Z, self.pixel_size)
 
 class MainWindow(HasTraits):
     '''
