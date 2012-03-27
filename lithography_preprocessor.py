@@ -303,8 +303,8 @@ class Picture(HasTraits):
 
         if size(self.data) != 0: # Only if data has been loaded
             Ny, Nx = self.data.shape # number of pixels
-            self.width = Nx * self.pixel_spacing
-            self.height = Ny * self.pixel_spacing
+            self.width = (Nx - 1) * self.pixel_spacing  # between centres
+            self.height = (Ny - 1) * self.pixel_spacing # idem
             self.update_preview2d()
             self.update_preview3d()
 
@@ -392,7 +392,7 @@ class MainWindow(HasTraits):
     def _export_data_fired(self):
         ''' Export the points to expose to the specified file. ''' 
 
-        print "Exporting data to %s", self.export_path
+        print "Exporting data to %s" % self.export_path
         im = self.image_config
         points = c_[im.X, im.Y, im.Z]
 
@@ -400,11 +400,10 @@ class MainWindow(HasTraits):
             # make sure user wants to overwrite
             answer = dialog.confirmation(None, 
                                          'File already exists. Overwrite?')
-            if answer == wx.ID_YES:
-                savetxt(self.export_path, points, fmt='%.6f')
-            else:
-                # don't save...
-                pass
+            if answer == wx.ID_NO:
+                return # exit function before saving.
+
+        savetxt(self.export_path, points, fmt='%.6f')
 
 
 ##############################
