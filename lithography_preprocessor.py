@@ -42,6 +42,10 @@ __version__ = '0.1 alpha'
 
 import os
 
+# Select wx backend
+from enthought.etsconfig.api import ETSConfig
+ETSConfig.toolkit = 'wx'
+
 # Math and plotting
 from mpl_figure_editor import MPLFigureEditor, Figure
 from mpl_toolkits.mplot3d import Axes3D
